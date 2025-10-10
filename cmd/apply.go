@@ -32,13 +32,14 @@ type ApplyResult struct {
 
 func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	r := ApplyResult{
 		Success:   false,
 		PrevValue: []byte{},
 		LogIndex:  logindex,
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if logindex != s.lastlogi+1 {
 		return r, errors.New("error: new apply request index is not equal to last log index + 1")
@@ -51,13 +52,29 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 	if cmd.Seq <= s.dedupMap[cmd.ClientID].seq {
 		r.PrevValue = s.dedupMap[cmd.ClientID].result.PrevValue
 		// return previous ApplyResult if we are dealing with a dupe
-		return s.dedupMap[string(cmd.Key)].result, nil
+		return s.dedupMap[cmd.ClientID].result, nil
 
 	}
 
 	switch cmd.Instruct {
 	case CmdPut: // Put
-		return r, nil // stub
+		v, ok := s.kv[string(cmd.Key)]
+		input := append([]byte(nil), cmd.Value...)
+		if !ok {
+			s.kv[string(cmd.Key)] = input
+			s.lastlogi = logindex
+			r.Success = true
+			// == TODO: ADD DEDUP UPDATE ====
+			return r, nil
+		}
+		// we make a copy of the original value that we're overwriting
+		oldvalcopy := append([]byte(nil), v...)
+		r.PrevValue = oldvalcopy
+		s.kv[string(cmd.Key)] = input
+		r.Success = true
+		s.lastlogi = logindex
+		// == TODO: ADD DEDUP UPDATE ====
+		return r, nil
 
 	case CmdDelete: // Delete
 		v, ok := s.kv[string(cmd.Key)]
@@ -70,7 +87,8 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 		delete(s.kv, string(cmd.Key))
 		r.PrevValue = prev
 		r.Success = true
-		s.lastlogi += 1
+		s.lastlogi = logindex
+		// == TODO: ADD DEDUP UPDATE ====
 		return r, nil
 	default:
 		return r, errors.New("error: Apply failed, invalid cmd passed.")
