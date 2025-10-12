@@ -1,4 +1,4 @@
-package main
+package sixpaths_kvs
 
 import (
 	"errors"
@@ -46,11 +46,12 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 	}
 
 	// we check whether the SEQ num provided by the cmd is the equal (or older) than
-	// the last SEQ num provided by this particular client's request.
+	// the last SEQ num provided by this particular client.
 	// Since SEQ nums are unique per request, if these two are the same
 	// then we are dealing with a duplicate request.
 	if cmd.Seq <= s.dedupMap[cmd.ClientID].seq {
 		r.PrevValue = s.dedupMap[cmd.ClientID].result.PrevValue
+		s.lastlogi = logindex
 		// return previous ApplyResult if we are dealing with a dupe
 		return s.dedupMap[cmd.ClientID].result, nil
 
@@ -64,7 +65,13 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 			s.kv[string(cmd.Key)] = input
 			s.lastlogi = logindex
 			r.Success = true
-			// == TODO: ADD DEDUP UPDATE ====
+
+			//update dedup accordingly after successful Put()
+			e := s.dedupMap[cmd.ClientID]
+			e.seq = cmd.Seq
+			e.result = r
+			s.dedupMap[cmd.ClientID] = e
+
 			return r, nil
 		}
 		// we make a copy of the original value that we're overwriting
@@ -73,7 +80,13 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 		s.kv[string(cmd.Key)] = input
 		r.Success = true
 		s.lastlogi = logindex
-		// == TODO: ADD DEDUP UPDATE ====
+
+		//update dedup accordingly
+		e := s.dedupMap[cmd.ClientID]
+		e.seq = cmd.Seq
+		e.result = r
+		s.dedupMap[cmd.ClientID] = e
+
 		return r, nil
 
 	case CmdDelete: // Delete
@@ -88,7 +101,13 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 		r.PrevValue = prev
 		r.Success = true
 		s.lastlogi = logindex
-		// == TODO: ADD DEDUP UPDATE ====
+
+		// update dedup accordingly
+		e := s.dedupMap[cmd.ClientID]
+		e.seq = cmd.Seq
+		e.result = r
+		s.dedupMap[cmd.ClientID] = e
+
 		return r, nil
 	default:
 		return r, errors.New("error: Apply failed, invalid cmd passed.")

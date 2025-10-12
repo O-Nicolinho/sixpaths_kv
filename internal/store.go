@@ -1,6 +1,8 @@
-package main
+package sixpaths_kvs
 
-import "sync"
+import (
+	"sync"
+)
 
 type Store struct {
 	kv       map[string][]byte
@@ -12,4 +14,13 @@ type Store struct {
 type Dedup struct {
 	seq    uint64
 	result ApplyResult
+}
+
+func NewStore() (*Store, error) {
+	var st Store = Store{
+		kv:       make(map[string][]byte),
+		dedupMap: make(map[string]Dedup),
+	}
+	
+	return &st, nil
 }
