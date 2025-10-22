@@ -3,8 +3,11 @@ package sixpaths_kvs
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 )
@@ -17,13 +20,14 @@ type WAL struct {
 	hdrLen int
 }
 
+var walHeader = []byte("WALv1-BE\x00")
+
 type Record struct {
 	LogIndex uint64
 	Cmd      Command
 }
 
 func NewWAL(path string) (*WAL, error) {
-	var walHeader = []byte("WALv1-BE\x00")
 
 	// we create the skeleton of the WAL we're going to return
 	var newWAL *WAL = new(WAL)
@@ -99,4 +103,88 @@ func NewWAL(path string) (*WAL, error) {
 	newWAL.hdrLen = len(walHeader)
 
 	return newWAL, nil
+}
+
+func (w *WAL) Close() error {
+
+	err := w.bw.Flush()
+	if err != nil {
+		return err
+	}
+
+	err = w.f.Sync()
+	if err != nil {
+		return err
+	}
+
+	err = w.f.Close()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func Encode(rec *Record) ([]byte, error) {
+	// This function takes a record and encodes it into a
+	// []byte in a format that our WAL can understand.
+
+	var enc []byte
+
+	// First, we validate the record entries.
+
+	if rec.Cmd.Instruct != CmdPut && rec.Cmd.Instruct != CmdDelete {
+		return nil, errors.New("invalid Command, neither Put nor Delete")
+	}
+
+	// clientID must fit in u8.
+	if len(rec.Cmd.ClientID) > math.MaxUint8 {
+		return nil, errors.New("invalid ClientID length, exceeds 8 bits")
+	}
+
+	// Key must fit in u16
+	if len(rec.Cmd.Key) > math.MaxUint16 {
+		return nil, errors.New("invalid key, length exceeds 16 bits")
+	}
+	// value must fit in u32
+	if uint64(len(rec.Cmd.Value)) > math.MaxUint32 {
+		return nil, errors.New("invalid value, length exceeds 32 bits")
+	}
+
+	// encode the LogIndex to bytes and append it to our enc []byte
+	enc = binary.BigEndian.AppendUint64(enc, rec.LogIndex)
+
+	// we do not need to encode since it's only 1 byte
+	// endianness doesn't matter for 1 byte
+	// We append the instruction
+	enc = append(enc, uint8(rec.Cmd.Instruct))
+
+	// we append the length of clientID as 1 byte
+	enc = append(enc, uint8(len(rec.Cmd.ClientID)))
+
+	// we append the actual client ID
+	enc = append(enc, rec.Cmd.ClientID...)
+
+	// we append SEQ (since it's an int of more than one byte, endianness matters)
+	enc = binary.BigEndian.AppendUint64(enc, rec.Cmd.Seq)
+
+	// we append the length of the key
+	enc = binary.BigEndian.AppendUint16(enc, uint16(len(rec.Cmd.Key)))
+
+	// we append the key itself
+	enc = append(enc, rec.Cmd.Key...)
+
+	// we append the length of the value
+	enc = binary.BigEndian.AppendUint32(enc, uint32(len(rec.Cmd.Value)))
+
+	// we append the value itself
+	enc = append(enc, rec.Cmd.Value...)
+
+	if enc == nil {
+		return nil, errors.New("nil rec")
+	}
+
+	return enc, nil
+
+	// TODO: Work on frame
 }
