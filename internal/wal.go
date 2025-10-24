@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math"
 	"os"
@@ -184,7 +185,34 @@ func Encode(rec *Record) ([]byte, error) {
 		return nil, errors.New("nil rec")
 	}
 
-	return enc, nil
+	// All the main record entries are now added to our enc byte slice.
+	// Time to add the relevant metadata
 
-	// TODO: Work on frame
+	// computes crc in order to have a way to verify data integrity
+	crc := crc32.ChecksumIEEE(enc)
+
+	// we create the frame which is an empty byte slice of len(enc)
+	// plus 4 bytes for the crc plus the length (4 bytes)
+	frame := make([]byte, 0, 8+len(enc))
+
+	// we calculate the length of the frame which is the len(enc)
+	// plus 4 bytes for the crc
+	frameLen := uint32(4 + len(enc))
+
+	// we append the length of the crc as a value to our frame
+	frame = binary.BigEndian.AppendUint32(frame, frameLen)
+
+	// we append the crc to our frame
+	frame = binary.BigEndian.AppendUint32(frame, crc)
+
+	// now we add the enc byte slice to the frame
+	frame = append(frame, enc...)
+
+	// Now the record encoded into our WAL as bytes is in the following format:
+	// frame = [u32 framelen][u32 crc32][enc]
+	// [enc] = [u64 logIndex][u8 cmdType][u8 clientIDlen][clientID bytes][u64 seq]
+	// cont. [u16 keyLen][key bytes][u32 valLen][value bytes]
+
+	return frame, nil
+
 }
