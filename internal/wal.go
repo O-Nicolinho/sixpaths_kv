@@ -29,6 +29,7 @@ type Record struct {
 }
 
 func NewWAL(path string) (*WAL, error) {
+	//This function creates a new WAL using the path provided
 
 	// we create the skeleton of the WAL we're going to return
 	var newWAL *WAL = new(WAL)
@@ -215,4 +216,37 @@ func Encode(rec *Record) ([]byte, error) {
 
 	return frame, nil
 
+}
+
+func (wal *WAL) Append(rec *Record) error {
+	// checks record integrity
+	// calls encode to get the frame
+	// Flushes, Syncs, and updates the offset
+
+	fr, err := Encode(rec)
+	if err != nil {
+		return err
+	}
+
+	// We attempt to append the frame at the offset
+	// to our WAL file. If successful, we will get the incr
+	_, err = wal.bw.Write(fr)
+	if err != nil {
+		return err
+	}
+
+	err = wal.bw.Flush()
+	if err != nil {
+		return err
+	}
+
+	err = wal.f.Sync()
+	if err != nil {
+		return err
+	}
+
+	// if successful write, we update our offset
+	wal.offset += int64(len(fr))
+
+	return nil
 }
