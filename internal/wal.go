@@ -250,3 +250,106 @@ func (wal *WAL) Append(rec *Record) error {
 
 	return nil
 }
+
+func Decode(payload []byte) (Record, error) {
+
+	newrec := Record{}
+	newcom := Command{}
+
+	// we make a copy to not modify the original
+	paycopy := append([]byte(nil), payload...)
+
+	off := 0
+	// the need() func allows us to continuously verify if the payload is large enough
+	need := func(n int) error {
+		if len(paycopy)-off < n {
+			return fmt.Errorf("payload is too short, %d more bytes are needed. (off=%d, len=%d)", n, off, len(payload))
+		} else {
+			return nil
+		}
+	}
+
+	// first extract the logIndex
+	err := need(8)
+	if err != nil {
+		return Record{}, err
+	}
+	newrec.LogIndex = binary.BigEndian.Uint64(paycopy[off : off+8])
+	off += 8
+
+	// then we extract the cmdType
+	err = need(1)
+	if err != nil {
+		return Record{}, err
+	}
+
+	if !validType(CommandType(paycopy[off])) {
+		return Record{}, fmt.Errorf("wrong Commandtype, expected 1 or 2 but got: %d", CommandType(paycopy[off]))
+	}
+	newcom.Instruct = CommandType(paycopy[off])
+	off += 1
+
+	// extract clientIDlen
+	err = need(1)
+	if err != nil {
+		return Record{}, err
+	}
+	clientidlen := int(paycopy[off])
+	off += 1
+
+	// extract clientID
+	err = need(clientidlen)
+	if err != nil {
+		return Record{}, err
+	}
+	newcom.ClientID = string(paycopy[off : off+clientidlen])
+	off += clientidlen
+
+	// extract seq
+	err = need(8)
+	if err != nil {
+		return Record{}, err
+	}
+	newcom.Seq = binary.BigEndian.Uint64(paycopy[off : off+8])
+	off += 8
+
+	//extract keylen
+	err = need(2)
+	if err != nil {
+		return Record{}, err
+	}
+	keylen := binary.BigEndian.Uint16(paycopy[off : off+2])
+	off += 2
+
+	// extract key itself using keylen
+	err = need(int(keylen))
+	if err != nil {
+		return Record{}, err
+	}
+	k := make([]byte, int(keylen))
+	copy(k, paycopy[off:off+int(keylen)])
+	newcom.Key = k
+	off += int(keylen)
+
+	// extract value len
+	err = need(4)
+	if err != nil {
+		return Record{}, err
+	}
+	valuelen := int(binary.BigEndian.Uint32(paycopy[off : off+4]))
+	off += 4
+
+	// extract value using valuelen
+	err = need(valuelen)
+	if err != nil {
+		return Record{}, err
+	}
+	v := make([]byte, valuelen)
+	copy(v, paycopy[off:off+valuelen])
+	newcom.Value = v
+	off += valuelen
+
+	// now every relevant field is filled out so we return our decoded record
+	newrec.Cmd = newcom
+	return newrec, nil
+}
