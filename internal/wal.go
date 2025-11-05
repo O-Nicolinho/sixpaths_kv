@@ -353,3 +353,69 @@ func Decode(payload []byte) (Record, error) {
 	newrec.Cmd = newcom
 	return newrec, nil
 }
+
+func (w *WAL) readFrameAt(offset int64) ([]byte, int, error) {
+
+	// This func tries to read the frame at the given offset
+	// It returns the frame, the amount of bytes consumed (0 if failure)
+	// and a potential error.
+
+	var hdr [4]byte
+
+	// we try reading from the WAL bytefile at the given offset
+	n, err := w.f.ReadAt(hdr[:], offset)
+	if err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			//not enough bytes to read off the tail
+			return nil, 0, io.EOF
+		}
+		return nil, 0, err
+	}
+
+	if n < 4 {
+		// This means we do not have enough bytes to determine length
+		// Which means this data must be corrupted
+		return nil, 0, io.ErrUnexpectedEOF
+	}
+
+	frameLen := binary.BigEndian.Uint32(hdr[:])
+	// we make some frameLen checks to see if the data seems legit
+	if frameLen < 4 {
+		return nil, 0, errors.New("error: framelen too small")
+	}
+	if uint32(math.Pow(2, 30)) < frameLen {
+		return nil, 0, errors.New("error: Framelen too large, possible data corruption")
+	}
+
+	// we create a byteslice to store the frame body
+	frameBody := make([]byte, frameLen)
+	// we read our byte file at the offset plus 4 bytes to get the frame itself
+	n, err = w.f.ReadAt(frameBody, offset+4)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if uint32(n) < frameLen {
+		return nil, 0, io.ErrUnexpectedEOF
+	}
+
+	// Now we get the crc part from the frame
+	body := frameBody
+	// crcCheck contains the crc we parsed
+	crcCheck := binary.BigEndian.Uint32(body[:4])
+	// enc contains the rest of the payload
+	enc := body[4:]
+
+	// Then we verify the correctness of the crc by comparing it to
+	// the crc32 we get from the frame we parsed
+	got := crc32.ChecksumIEEE(enc)
+	// if the crc we get and the one we parsed are not equal,
+	// we know our data has been corrupted.
+	if got != crcCheck {
+		return nil, 0, errors.New("error: corruption")
+	}
+
+	//otherwise, everything looks good and we return our payload
+	return enc, int(4 + frameLen), nil
+
+}
