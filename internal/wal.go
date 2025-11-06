@@ -28,6 +28,12 @@ type Record struct {
 	Cmd      Command
 }
 
+var errCorrupt = errors.New("wal: corrupt")
+
+func isCorrupt(err error) bool {
+	return errors.Is(err, errCorrupt)
+}
+
 func NewWAL(path string) (*WAL, error) {
 	//This function creates a new WAL using the path provided
 
@@ -381,10 +387,10 @@ func (w *WAL) readFrameAt(offset int64) ([]byte, int, error) {
 	frameLen := binary.BigEndian.Uint32(hdr[:])
 	// we make some frameLen checks to see if the data seems legit
 	if frameLen < 4 {
-		return nil, 0, errors.New("error: framelen too small")
+		return nil, 0, fmt.Errorf("%w: bad framelen = %d", errCorrupt, frameLen)
 	}
 	if uint32(math.Pow(2, 30)) < frameLen {
-		return nil, 0, errors.New("error: Framelen too large, possible data corruption")
+		return nil, 0, fmt.Errorf("%w: frameLen overflows", errCorrupt)
 	}
 
 	// we create a byteslice to store the frame body
@@ -392,6 +398,9 @@ func (w *WAL) readFrameAt(offset int64) ([]byte, int, error) {
 	// we read our byte file at the offset plus 4 bytes to get the frame itself
 	n, err = w.f.ReadAt(frameBody, offset+4)
 	if err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return nil, 0, io.ErrUnexpectedEOF
+		}
 		return nil, 0, err
 	}
 
@@ -412,10 +421,92 @@ func (w *WAL) readFrameAt(offset int64) ([]byte, int, error) {
 	// if the crc we get and the one we parsed are not equal,
 	// we know our data has been corrupted.
 	if got != crcCheck {
-		return nil, 0, errors.New("error: corruption")
+		return nil, 0, errCorrupt
 	}
 
 	//otherwise, everything looks good and we return our payload
 	return enc, int(4 + frameLen), nil
+
+}
+
+func (w *WAL) ReplayAll() (recs []Record, lastIndex uint64, err error) {
+
+	// we begin right after our header
+	off := int64(w.hdrLen)
+	// the last good offset is presumably what goes right after our header, so in case
+	// of early failure we can always return there.
+	lastGood := off
+
+	// out will contain the record slice we're going to build up and return
+	var out []Record
+
+	var repairNeeded bool = true
+
+	// this loop reads frames and decodes them until it reaches an error
+	for {
+		// we (attempt) to read the next frame
+		enc, n, rerr := w.readFrameAt(off)
+		// If rerr is not nil then our loop must end
+		if rerr != nil {
+			// if rerr is just io.EOF then we do not need to repair anything
+			// if rerr is anything else then we keep repairNeeded true
+			if rerr == io.EOF {
+				repairNeeded = false
+			}
+			if rerr != io.EOF && rerr != io.ErrUnexpectedEOF && !isCorrupt(rerr) {
+				return out, lastIndex, rerr
+			}
+			break
+		}
+
+		// We attempt to decode the frame we got from readFrameAt
+		currRec, derr := Decode(enc)
+		// if the decoding fails, we break
+		if derr != nil {
+			repairNeeded = true
+			break
+		}
+
+		// If we've made it to this point then we successfully decoded the frame,
+		//so we add the record to our record slice "out"
+		out = append(out, currRec)
+		// we update the lastidx
+		lastIndex = currRec.LogIndex
+		// since our decode was successful, we
+		off = off + int64(n)
+		lastGood = off
+	}
+
+	if repairNeeded {
+		// we truncate to the lastGood and we reset the writer state.
+		err = w.f.Truncate(lastGood)
+		if err != nil {
+			return out, lastIndex, err
+		}
+		err = w.f.Sync()
+		if err != nil {
+			return out, lastIndex, err
+		}
+
+		_, err = w.f.Seek(lastGood, io.SeekStart)
+		if err != nil {
+			return out, lastIndex, err
+		}
+
+		// our WAL's offset is set to the last good offset
+		w.offset = lastGood
+		w.bw.Reset(w.f)
+		return out, lastIndex, nil
+	}
+
+	//otherwise repair is not needed and we just clean up and return out
+	_, err = w.f.Seek(lastGood, io.SeekStart)
+	if err != nil {
+		return out, lastIndex, err
+	}
+
+	w.offset = lastGood
+	w.bw.Reset(w.f)
+	return out, lastIndex, nil
 
 }
