@@ -1,8 +1,16 @@
 package sixpaths_kvs
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestNewStore(t *testing.T) {
-	//s, err := NewStore()
 
+	s, err := NewStore()
+	if err != nil {
+
+	}
+
+	fmt.Println(s)
 }
