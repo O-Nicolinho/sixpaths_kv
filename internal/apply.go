@@ -119,7 +119,7 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 		return r, nil
 
 	default:
-		return r, errors.New("error: Apply failed, invalid cmd passed.")
+		return r, errors.New("error: Apply failed, invalid cmd passed")
 	}
 
 }

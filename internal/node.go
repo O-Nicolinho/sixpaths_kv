@@ -83,3 +83,21 @@ func OpenNode(dataDir string) (*Node, error) {
 
 	return &newNode, nil
 }
+
+func (n *Node) Close() error {
+
+	// check that node and wal are not nil
+	if n == nil || n.wal == nil {
+		return nil
+	}
+
+	//attempt to close the WAL
+	err := n.wal.Close()
+
+	// on failure, just return the error
+	if err != nil {
+		return err
+	}
+	//on success, return nil
+	return nil
+}
