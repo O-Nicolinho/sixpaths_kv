@@ -91,8 +91,16 @@ func (s *Store) Apply(cmd Command, logindex uint64) (ApplyResult, error) {
 
 	case CmdDelete: // Delete
 		v, ok := s.kv[string(cmd.Key)]
+		// if we try to delete an empty value we just return sucess without changing the kv store
 		if !ok {
-			return r, errors.New("error: value at key in store is already empty; nothing to delete")
+			r.Success = true
+			s.lastlogi = logindex
+
+			e := s.dedupMap[cmd.ClientID]
+			e.seq = cmd.Seq
+			e.result = r
+			s.dedupMap[cmd.ClientID] = e
+			return r, nil
 		}
 		// we make a copy of the byte slice to not alter it
 		prev := append([]byte(nil), v...)
