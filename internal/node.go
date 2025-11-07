@@ -101,3 +101,47 @@ func (n *Node) Close() error {
 	//on success, return nil
 	return nil
 }
+
+func (n *Node) Exec(cmd Command) (ApplyResult, error) {
+	// we take the lock to keep the writes serial
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	// we build the skeleton of the ApplyResult we're gonna return
+
+	// we check if this request is a duplicate (by comparing Seqs)
+	n.store.mu.Lock()
+	if n.store.dedupMap[cmd.ClientID].seq >= cmd.Seq {
+		defer n.store.mu.Unlock()
+		return n.store.dedupMap[cmd.ClientID].result, nil
+	}
+	n.store.mu.Unlock()
+
+	// we check if the cmd type is valid
+	if !validType(cmd.Instruct) {
+
+		return ApplyResult{}, fmt.Errorf("error: invalid command")
+	}
+
+	// we get the index for the next command application
+	nextIdx := n.last + 1
+
+	// we build the record for our WAL
+	appRec := Record{
+		LogIndex: nextIdx,
+		Cmd:      cmd,
+	}
+	// we get the encoded record to add to our WAL
+	err := n.wal.Append(&appRec)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+
+	ap, err := n.store.Apply(cmd, nextIdx)
+	if err != nil {
+		return ap, err
+	}
+
+	n.last = nextIdx
+
+	return ap, nil
+}
