@@ -20,21 +20,25 @@ func OpenNode(dataDir string) (*Node, error) {
 	// we check whether the dir at dataDir exists
 	info, err := os.Stat(dataDir)
 
-	// we check that dataDir is a directory and not a file
-	if info.IsDir() == false {
-		return nil, fmt.Errorf("error: dataDir is a file, not a directory: %w", err)
-	}
-
-	// if it doesn't exist, we create it.
-	if os.IsNotExist(err) {
-		err = os.MkdirAll(dataDir, 0o755)
-		if err != nil {
-			return nil, fmt.Errorf("error: OpenNode() failure, unable to create directory: %w", err)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// if it doesn't exist, we create it.
+			if mkErr := os.MkdirAll(dataDir, 0o755); mkErr != nil {
+				return nil, fmt.Errorf("error: OpenNode() failure, unable to create directory: %w", mkErr)
+			}
+			// refresh info after creating the dir
+			if info, err = os.Stat(dataDir); err != nil {
+				return nil, fmt.Errorf("stat %q failed after mkdir: %w", dataDir, err)
+			}
+		} else {
+			// any other errors: just return the error
+			return nil, fmt.Errorf("stat %q failed: %w", dataDir, err)
 		}
 	}
-	// any other errors: just return the error
-	if err != nil {
-		return nil, err
+
+	// we check that dataDir is a directory and not a file
+	if !info.IsDir() {
+		return nil, fmt.Errorf("error: dataDir is a file, not a directory")
 	}
 
 	// filepath dataDir/wal
@@ -45,13 +49,18 @@ func OpenNode(dataDir string) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error: OpenNode() failure, unable to create WAL: %w", err)
 	}
+	// ensure we close the WAL on any failure below
+	defer func() {
+		if err != nil {
+			_ = nwal.Close()
+		}
+	}()
 
 	// now we use ReplayAll to get a slice of Records
 	// this will allow us to use these records to recreate the KV store
 	recs, lastidx, err := nwal.ReplayAll()
 	if err != nil {
 		// on failure we close the WAL
-		nwal.Close()
 		return nil, err
 	}
 
@@ -59,7 +68,6 @@ func OpenNode(dataDir string) (*Node, error) {
 	nstore, err := NewStore()
 	if err != nil {
 		// on failure we close the WAL
-		nwal.Close()
 		return nil, err
 	}
 
@@ -68,7 +76,6 @@ func OpenNode(dataDir string) (*Node, error) {
 		_, err = nstore.Apply(rec.Cmd, rec.LogIndex)
 		if err != nil {
 			// on failure we close the WAL
-			nwal.Close()
 			return nil, fmt.Errorf("error Applying: %w", err)
 		}
 	}
