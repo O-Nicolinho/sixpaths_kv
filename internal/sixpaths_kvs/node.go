@@ -145,3 +145,7 @@ func (n *Node) Exec(cmd Command) (ApplyResult, error) {
 
 	return ap, nil
 }
+
+func (n *Node) Get(key string) ([]byte, error) {
+	return n.store.Get(key)
+}
