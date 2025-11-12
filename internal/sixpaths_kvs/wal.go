@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type WAL struct {
@@ -246,10 +248,12 @@ func (wal *WAL) Append(rec *Record) error {
 		return err
 	}
 
+	start := time.Now()
 	err = wal.f.Sync()
 	if err != nil {
 		return err
 	}
+	log.Printf("wal_append bytes=%d fsync_ms=%d", len(fr), time.Since(start).Milliseconds())
 
 	// if successful write, we update our offset
 	wal.offset += int64(len(fr))

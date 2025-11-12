@@ -2,9 +2,11 @@ package sixpaths_kvs
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Node struct {
@@ -58,7 +60,9 @@ func OpenNode(dataDir string) (*Node, error) {
 
 	// now we use ReplayAll to get a slice of Records
 	// this will allow us to use these records to recreate the KV store
+	t0 := time.Now()
 	recs, lastidx, err := nwal.ReplayAll()
+	log.Printf("wal_replay records=%d lastIndex=%d dur_ms=%d", len(recs), lastidx, time.Since(t0).Milliseconds())
 	if err != nil {
 		// on failure we close the WAL
 		return nil, err
@@ -119,6 +123,8 @@ func (n *Node) Exec(cmd Command) (ApplyResult, error) {
 	n.store.mu.Lock()
 	if n.store.dedupMap[cmd.ClientID].seq >= cmd.Seq {
 		defer n.store.mu.Unlock()
+		IncDedup()
+		log.Printf("dedup hit client=%s seq=%d lastSeq=%d", cmd.ClientID, cmd.Seq, n.store.dedupMap[cmd.ClientID].seq)
 		return n.store.dedupMap[cmd.ClientID].result, nil
 	}
 	n.store.mu.Unlock()
