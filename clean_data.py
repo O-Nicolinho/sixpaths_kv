@@ -12,7 +12,7 @@ import shutil
 
 # Directories used by your nodes. Adjust if your NodeConfig changes.
 DATA_DIRS = [
-    "./data",   # original single-node dir, if you used it
+    "./data", 
     "./data1",
     "./data2",
     "./data3",
