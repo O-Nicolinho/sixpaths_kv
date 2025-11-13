@@ -21,6 +21,12 @@ type router struct {
 	backendHost string                    // the host where we can actually reach the nodes
 }
 
+type nodeMetrics struct {
+	ID      string                       `json:"id"`
+	Addr    string                       `json:"addr"`
+	Metrics sixpaths_kvs.MetricsSnapshot `json:"metrics"`
+}
+
 func main() {
 	// the addr is where the router listens for client traffic
 	addr := flag.String("addr", ":8080", "router listen address")
@@ -46,6 +52,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/put", r.handlePut)
 	mux.HandleFunc("/get", r.handleGet)
+	mux.HandleFunc("/metrics", r.handleMetrics)
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -122,7 +129,13 @@ func (r *router) handlePut(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// we choose node the node according to our pickNodeForKey funct
+
 	node := r.pickNodeForKey(parsed.Key)
+
+	log.Printf("ROUTER: PUT key=%q client=%s seq=%d -> node=%s addr=%s",
+		parsed.Key, parsed.Client, parsed.Seq, node.ID, node.ClientAddr)
+
 	backendURL := fmt.Sprintf("http://%s%s/put", r.backendHost, node.ClientAddr)
 	resp, err := http.Post(backendURL, "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -156,6 +169,8 @@ func (r *router) handleGet(w http.ResponseWriter, req *http.Request) {
 	// we pick the backend node we're get'ing from based on the hashed key
 	node := r.pickNodeForKey(key)
 
+	log.Printf("ROUTER: GET key=%q -> node=%s addr=%s", key, node.ID, node.ClientAddr)
+
 	q := url.Values{}
 	q.Set("key", key)
 	backendURL := fmt.Sprintf("http://%s%s/get?%s", r.backendHost, node.ClientAddr, q.Encode())
@@ -171,4 +186,59 @@ func (r *router) handleGet(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// we get metrics for each of the nodes and create a new cluster wide metrics report
+func (r *router) handleMetrics(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		proxyError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// simple HTTP client with a small timeout so a dead node doesn't block everything
+	client := &http.Client{
+		Timeout: 500 * time.Millisecond,
+	}
+
+	var out []nodeMetrics
+
+	for _, n := range r.nodes {
+		url := fmt.Sprintf("http://%s%s/metrics", r.backendHost, n.ClientAddr)
+
+		resp, err := client.Get(url)
+		if err != nil {
+			log.Printf("router: metrics fetch failed for node=%s addr=%s: %v", n.ID, n.ClientAddr, err)
+			// still include an entry, but mark metrics as zero-values
+			out = append(out, nodeMetrics{
+				ID:      n.ID,
+				Addr:    n.ClientAddr,
+				Metrics: sixpaths_kvs.MetricsSnapshot{},
+			})
+			continue
+		}
+
+		var snap sixpaths_kvs.MetricsSnapshot
+		if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+			log.Printf("router: metrics decode failed for node=%s addr=%s: %v", n.ID, n.ClientAddr, err)
+			_ = resp.Body.Close()
+			out = append(out, nodeMetrics{
+				ID:      n.ID,
+				Addr:    n.ClientAddr,
+				Metrics: sixpaths_kvs.MetricsSnapshot{},
+			})
+			continue
+		}
+		_ = resp.Body.Close()
+
+		out = append(out, nodeMetrics{
+			ID:      n.ID,
+			Addr:    n.ClientAddr,
+			Metrics: snap,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(out)
 }

@@ -13,14 +13,23 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "HTTP listen address")
-	data := flag.String("data", "./data", "data directory")
+	id := flag.String("id", "", "node ID (n1..n6)")
 	flag.Parse()
 
-	// Boot node (WAL open + replay -> Store)
-	node, err := sixpaths_kvs.OpenNode(*data)
+	if *id == "" {
+		log.Fatalf("must provide -id (n1..n6)")
+	}
+
+	// Look up our config and the full cluster.
+	cfg, all, err := sixpaths_kvs.ConfigForID(*id)
 	if err != nil {
-		log.Fatalf("OpenNode failed: %v", err)
+		log.Fatalf("ConfigForID: %v", err)
+	}
+
+	// Boot node (WAL open + replay -> Store), with ID + peers filled in.
+	node, err := sixpaths_kvs.OpenClusterNode(cfg, all)
+	if err != nil {
+		log.Fatalf("OpenClusterNode failed: %v", err)
 	}
 	defer func() {
 		if err := node.Close(); err != nil {
@@ -28,10 +37,10 @@ func main() {
 		}
 	}()
 
-	// Start HTTP server
-	srv := sixpaths_kvs.NewHTTPServer(node, *addr)
+	// Start HTTP server on cfg.ClientAddr
+	srv := sixpaths_kvs.NewHTTPServer(node, cfg.ClientAddr)
 	go func() {
-		log.Printf("serving at %s (data=%s)", *addr, *data)
+		log.Printf("serving at %s (id=%s data=%s)", cfg.ClientAddr, cfg.ID, cfg.DataDir)
 		if err := srv.Start(); err != nil {
 			log.Printf("server exited: %v", err)
 		}
@@ -47,5 +56,5 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
-	log.Printf("bye")
+	log.Printf("adieu")
 }
