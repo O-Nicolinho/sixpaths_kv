@@ -9,7 +9,14 @@ import (
 	"time"
 )
 
+type Peer struct {
+	ID       string
+	RaftAddr string
+}
+
 type Node struct {
+	id      string // the node's individual ID
+	peers   []Peer // list of other nodes in the cluster (Excluding this node)
 	wal     *WAL
 	store   *Store
 	last    uint64
@@ -161,4 +168,26 @@ func (n *Node) Exec(cmd Command) (ApplyResult, error) {
 
 func (n *Node) Get(key string) ([]byte, error) {
 	return n.store.Get(key)
+}
+
+func OpenClusterNode(cfg NodeConfig, all []NodeConfig) (*Node, error) {
+	n, err := OpenNode(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	n.id = cfg.ID
+
+	// we create the list of Peers using the cluster config (and we excl. self)
+	for _, c := range all {
+		if c.ID == cfg.ID {
+			continue
+		}
+		n.peers = append(n.peers, Peer{
+			ID:       c.ID,
+			RaftAddr: c.RaftAddr,
+		})
+	}
+
+	return n, nil
 }
