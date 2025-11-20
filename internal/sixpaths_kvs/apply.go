@@ -4,6 +4,10 @@ import (
 	"errors"
 )
 
+// apply.go defines the Command type which allows us to interface with the KV store
+// in a very systematic way.
+// apply.go includes logic for putting and deleting items from the store
+
 type Command struct {
 	Instruct CommandType
 	ClientID string

@@ -12,6 +12,11 @@ import (
 	"github.com/O-Nicolinho/sixpaths_kv/internal/sixpaths_kvs"
 )
 
+// the kvs/main.go starts a single KV node process
+// we get the node id, listen address, datadirs and arguments
+// then we boot a node by opening its WAL and replaying its state
+// to recreate the store.
+
 func main() {
 	id := flag.String("id", "", "node ID (n1..n6)")
 	flag.Parse()

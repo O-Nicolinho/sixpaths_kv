@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// node.go implements a single KV node which has its own WAL and KV store
+// On startup, it attemps to recreate the store using the WAL
+// Exec() is used to serialize writes and append instructs to WAL and then applies them to the store
+
 type Peer struct {
 	ID       string
 	RaftAddr string
@@ -184,8 +188,7 @@ func OpenClusterNode(cfg NodeConfig, all []NodeConfig) (*Node, error) {
 			continue
 		}
 		n.peers = append(n.peers, Peer{
-			ID:       c.ID,
-			RaftAddr: c.RaftAddr,
+			ID: c.ID,
 		})
 	}
 

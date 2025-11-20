@@ -5,6 +5,11 @@ import (
 	"sync"
 )
 
+// store.go defines the KV store data struct
+// we get a map from string keys to byte values,
+// a Dedup map to make sure dupe requests from the same client arent
+// applied twice.
+
 type Store struct {
 	kv       map[string][]byte
 	lastlogi uint64

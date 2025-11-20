@@ -15,6 +15,15 @@ import (
 	"time"
 )
 
+// wal.go implements a write-ahead log for data durability
+// Our wal encodes all the applications of commands to our store
+// so that we can recreate this node's store by simply
+// applying the commands on the wal in order.
+
+// The wal is written in bytes so all of our records are as well
+// translating our record and command structs into bytes is a big part
+// of this file's logic.
+
 type WAL struct {
 	f      *os.File
 	path   string

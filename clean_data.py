@@ -10,7 +10,7 @@ start the cluster from a clean slate.
 import os
 import shutil
 
-# Directories used by your nodes. Adjust if your NodeConfig changes.
+
 DATA_DIRS = [
     "./data", 
     "./data1",

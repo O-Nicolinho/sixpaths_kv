@@ -15,6 +15,12 @@ import (
 	"github.com/O-Nicolinho/sixpaths_kv/internal/sixpaths_kvs"
 )
 
+// router/main.go is the front-end router for our cluster
+// to allow 3rd parties to interact with our kv store.
+// we handle /put, /delete, /get, /metrics.
+// for writes and reads, we hash it in order to
+// make sure that the right command is sent to the right node.
+
 // the router is a stateless front-end that works as an interface for interactions with the our KV cluster
 type router struct {
 	nodes       []sixpaths_kvs.NodeConfig // list of backend nodes in the cluster
@@ -53,6 +59,7 @@ func main() {
 	mux.HandleFunc("/put", r.handlePut)
 	mux.HandleFunc("/get", r.handleGet)
 	mux.HandleFunc("/metrics", r.handleMetrics)
+	mux.HandleFunc("/delete", r.handleDelete)
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -241,4 +248,58 @@ func (r *router) handleMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// routes a client's DELETE intruct to the correct backend node
+func (r *router) handleDelete(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		proxyError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Read body so we can both inspect and forward it.
+	body, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
+	if err != nil {
+		proxyError(w, http.StatusBadRequest, "unable to read body")
+		return
+	}
+	_ = req.Body.Close()
+
+	// Minimal struct to pull out the key (and validate client/seq).
+	var parsed struct {
+		Client string `json:"client"`
+		Seq    uint64 `json:"seq"`
+		Key    string `json:"key"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		proxyError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if parsed.Client == "" || parsed.Seq == 0 || parsed.Key == "" {
+		proxyError(w, http.StatusBadRequest, "missing client/seq/key")
+		return
+	}
+
+	// Pick backend node based on hashed key.
+	node := r.pickNodeForKey(parsed.Key)
+
+	// Log which node this delete is going to.
+	log.Printf("ROUTER: DELETE key=%q client=%s seq=%d -> node=%s addr=%s",
+		parsed.Key, parsed.Client, parsed.Seq, node.ID, node.ClientAddr)
+
+	backendURL := fmt.Sprintf("http://%s%s/delete", r.backendHost, node.ClientAddr)
+
+	// Forward the request body to the backend node as POST /delete.
+	resp, err := http.Post(backendURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		log.Printf("proxy DELETE to %s failed: %v", backendURL, err)
+		proxyError(w, http.StatusBadGateway, "backend unavailable")
+		return
+	}
+	defer resp.Body.Close()
+
+	// Forward backend response status + body to the client.
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }

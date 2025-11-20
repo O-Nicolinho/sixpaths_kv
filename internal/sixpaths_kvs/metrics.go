@@ -2,6 +2,10 @@ package sixpaths_kvs
 
 import "sync/atomic"
 
+// metrics.go implements simple counters for our KV node
+// It trakcs total Exec calls, Puts, Deleters, and dedup hits
+// Metrics work on a per node basis.
+
 var (
 	execTotal uint64
 	putTotal  uint64

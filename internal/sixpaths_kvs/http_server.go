@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// http_server.go is an HTTP API for a single KV node.
+// It handles http requests and then applies the requested logic (if valid)
+// on our wal and our store.
+
 // ===== Models =====
 
 type putReq struct {
@@ -66,7 +70,7 @@ func NewHTTPServer(node *Node, addr string) *HTTPServer {
 	// each path maps to a handler method
 	// handlers are responsible for method checking
 	mux.HandleFunc("/put", h.handlePut)
-	mux.HandleFunc("/del", h.handleDel)
+	mux.HandleFunc("/delete", h.handleDel)
 	mux.HandleFunc("/get", h.handleGet)
 	mux.HandleFunc("/health", h.handleHealth)
 	mux.HandleFunc("/metrics", h.handleMetrics)
