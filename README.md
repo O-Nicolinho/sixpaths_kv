@@ -48,11 +48,11 @@ To summarize:
 
 ## Architecture
 
-![Cluster architecture](docs/architecture.png)
+![Cluster architecture](docs/visual.png)
 
 ## Demo
 
-![Cluster demo](docs/cluster-demo.gif)
+![Cluster demo](docs/SixpathsKVS_Demo.gif)
 
 
 
