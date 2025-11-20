@@ -48,7 +48,7 @@ To summarize:
 
 ## Architecture
 
-![Cluster architecture](docs/visual.png)
+![Cluster architecture](docs/Visual.png)
 
 ## Demo
 
